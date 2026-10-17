@@ -1,0 +1,116 @@
+\chapter{Solutions to the Exercises}
+\label{app:solutions}
+
+\section*{Chapter 1}
+\begin{description}[leftmargin=1.2cm,labelwidth=1cm,itemsep=3pt]
+  \item[1.1] $1.25^{3}\approx1.95$: the power almost doubles (about $+95\%$) for a $25\%$ frequency increase.
+  \item[1.2] Each core: $0.5\times0.5^{2}=0.125\,P_0$. Eight cores: $8\times0.125=1.0\,P_0$, the same power as one fast core. Throughput: $8\times0.5=4\times$ one core at $f$.
+  \item[1.3] $12.8/25.6=0.5$~s. It is a bandwidth limit; neither more cores nor lower latency can beat it.
+  \item[1.4] Maximum $1/0.05=20$. For $n=16$: $S=1/(0.05+0.95/16)=1/0.109375\approx9.14$.
+  \item[1.5] Water pipe: latency is the time for the first drop to arrive after opening the tap; bandwidth is litres per second once the water flows. Or: a courier carrying
+        disks has huge bandwidth but hours of latency; a phone call has low latency but small bandwidth.
+\end{description}
+
+\section*{Chapter 2}
+\begin{description}[leftmargin=1.2cm,labelwidth=1cm,itemsep=3pt]
+  \item[2.1] (a) SIMD. (b) MIMD (an SPMD program on MIMD hardware). (c) MIMD. (d) SISD.
+  \item[2.2] $x=2$ if one thread's read--add--write completes before the other starts; $x=1$ if both read $0$ before either writes (a lost update). No other value is possible.
+  \item[2.3] Shared memory (NUMA): each processor can load and store any location in the machine with ordinary instructions, in one address space, and the hardware moves the data. In a cluster of two servers each has its own address space; sharing data requires explicit messages over a network.
+  \item[2.4] $1000/4=250$ vector iterations. With a data-dependent \cl{if/else} the lanes diverge, so each vector iteration executes \emph{both} branches under masks: about twice the work per iteration (plus the mask computation), but the iteration count is still $250$.
+  \item[2.5] First touch places all pages in the memory of thread~0's socket. The $8$ threads on the other socket access that memory remotely on every access, which is slower and loads one memory controller and the inter-socket link. Fix: initialise the array in parallel, with the same decomposition used later, so each thread's pages land on its own socket (or interleave pages across sockets).
+\end{description}
+
+\section*{Chapter 3}
+\begin{description}[leftmargin=1.2cm,labelwidth=1cm,itemsep=3pt]
+  \item[3.1]
+  \begin{center}
+  \small
+  \begin{tabular}{@{}lccc@{}}
+  \toprule
+  After step & $P_1$ & $P_2$ & $P_3$\\
+  \midrule
+  (a) $P_1$ writes & D & I & I\\
+  (b) $P_2$ reads & S & S & I\\
+  (c) $P_2$ writes & I & D & I\\
+  (d) $P_3$ reads & I & S & S\\
+  (e) $P_1$ reads & S & S & S\\
+  \bottomrule
+  \end{tabular}
+  \end{center}
+  In (b) and (d) the owner in D supplies the data and drops to S; in (c) $P_1$'s S copy is invalidated.
+  \item[3.2] Write-update: $50$ broadcasts (each write is sent to $P_2$); $P_2$'s read then hits: total $50$. Write-invalidate: the first write sends $1$ invalidation, the other $49$ writes hit in D with no traffic; $P_2$'s read is a miss served by $P_1$: total $2$.
+  \item[3.3] A $128$-byte line is $1024$ bits; the vector uses $256$ bits per line: $256/1024=25\%$.
+  \item[3.4] \cl{int c[4]} is $16$ bytes, so it fits in one line (all four counters share it). Pad each counter to $64$ bytes ($60$ bytes of padding after each $4$-byte \cl{int}); the padded array is $4\times64=256$ bytes (use $64$-byte alignment).
+  \item[3.5] After the first read each cache holds the line in S. With no writes there are no invalidations, so every later read hits locally; the only traffic is the initial miss for each cache.
+  \item[3.6] Block per thread: $\lceil100/8\rceil=13$ rows, rounded up to a multiple of $8$: $16$. Padded rows $=8\times16=128$. Each block is $128$ bytes (two lines) and a column is $1024$ bytes ($16$ lines), so no line is shared.
+\end{description}
+
+\section*{Chapter 4}
+\begin{description}[leftmargin=1.2cm,labelwidth=1cm,itemsep=3pt]
+  \item[4.1] (a) $4\times4$ mesh: diameter $2(4-1)=6$, bisection width $4$, links $2\cdot4\cdot3=24$. (b) Torus: diameter $2\lfloor4/2\rfloor=4$, bisection width $2\cdot4=8$, links $2p=32$.
+  \item[4.2] $1011\oplus0110=1101$ has three $1$'s, so three hops. Flipping from the lowest bit: $1011\to1010$ (bit~0) $\to1110$ (bit~2) $\to0110$ (bit~3).
+  \item[4.3] $\log_2 16=4$ stages of $8$ switches each: $32$ switches. Route $0101\to1100$, compare bit by bit: $0$ vs $1$ cross; $1$ vs $1$ pass; $0$ vs $0$ pass; $1$ vs $0$ cross. So stages $1$--$4$: cross, pass, pass, cross.
+  \item[4.4] Switch levels: $8,4,2,1$ switches, so $4$ levels. Diameter: up $4$ links to the root and down $4$: $8$ links.
+  \item[4.5] Channel bandwidth $=32\times2=64$~Gbit/s. Bisection width $=2\sqrt{256}=32$ links. Bisection bandwidth $=32\times64=2048$~Gbit/s $=256$~GB/s.
+  \item[4.6] A bus carries one transfer at a time, so its total bandwidth is fixed. As $p$ grows, each processor's share falls as $1/p$ and contention rises, even though cost grows only linearly.
+        Cheap cost does not mean scalable performance.
+  \item[4.7] \begin{center}\small
+  \begin{tabular}{@{}lcccc@{}}
+  \toprule
+   & Diameter & Bisection width & Links & Degree\\
+  \midrule
+  3-D torus $16^{3}$ & $3\cdot8=24$ & $2\cdot16^{2}=512$ & $3\cdot4096=12288$ & $6$\\
+  12-D hypercube & $12$ & $2048$ & $4096\cdot12/2=24576$ & $12$\\
+  \bottomrule
+  \end{tabular}\end{center}
+  The hypercube has half the diameter and four times the bisection width, but doubles the number of links and the number of ports each node needs, which makes it much harder to build.
+  \item[4.8] Store-and-forward: $100+8(10+10^{4})=100+80\,080=80\,180$. Cut-through: $100+8\cdot10+10^{4}=10\,180$. Cut-through is about $7.9\times$ faster.
+\end{description}
+
+\section*{Chapter 6}
+\begin{description}[leftmargin=1.2cm,labelwidth=1cm,itemsep=3pt]
+  \item[6.1] Each pixel's colour is computed independently, so $\sim2\times10^{6}$ jobs per frame can run at once, without communication. Another example: adding two vectors, or applying one filter to every pixel of a photo, or evaluating a neural-network layer on every element of a batch.
+  \item[6.2] Latency is the time for one task; throughput is tasks per second. A CPU thread is built to finish one task quickly (low latency); a GPU thread is slow, but thousands of them together complete more tasks per second (high throughput).
+  \item[6.3] $6912/128=54$ is not meaningful because (i) a CPU core is a full processor with its own instruction stream, big caches and speculation, whereas a GPU ``core'' is a single arithmetic unit that cannot run its own instruction stream; (ii) the clock speeds and the kind of work differ, and a GPU only reaches its rate on regular data-parallel code with enough data reuse; also the GPU has to be fed through a slower host link.
+  \item[6.4] (a) Yes: independent element-wise operation, though at $1$ FLOP per $12$ bytes it is memory-bound (it still gains from the bandwidth). (b) No: pointer chasing is a serial dependent chain. (c) Yes: each output pixel is independent. (d) No: each step depends on the previous one.
+  \item[6.5] Copy in $4/16=0.25$~s, kernel $0.2$~s, copy back $1/16=0.0625$~s: total $0.5125$~s versus $1.0$~s. Worthwhile; speed-up $1.0/0.5125\approx1.95$ (the kernel alone is $5\times$ faster, but the transfers cost most of the gain).
+  \item[6.6] Coarse-grained: few large tasks with infrequent synchronisation; fine-grained: very many tiny tasks. The slides assign coarse-grained work to the CPU and fine-grained to the GPU.
+\end{description}
+
+\section*{Chapter 7}
+\begin{description}[leftmargin=1.2cm,labelwidth=1cm,itemsep=3pt]
+  \item[7.1] GPU $\to$ $7$ GPCs $\to$ $7$ or $8$ TPCs each $\to$ $2$ SMs per TPC $\to$ $4$ partitions per SM $\to$ $16$ FP32 units (and $16$ INT32, $8$ FP64, $1$ Tensor Core) per partition. (Full GA100: $8$ GPCs of $8$ TPCs.)
+  \item[7.2] $108$ SMs is $54$ TPCs because a TPC has $2$ SMs. $64$ TPCs is the full chip ($8\times8$), which would have $128$ SMs. The slide mixes the full-chip TPC count with the product's SM count.
+  \item[7.3] FP32: $16\times4=64$ per SM, $\times108=6912$. FP64: $8\times4=32$, $\times108=3456$. Tensor Cores: $1\times4=4$, $\times108=432$. Registers: $16\,384\times4=65\,536$ per SM $=256$~KB, $\times108=27\,648$~KB.
+  \item[7.4] $6912\times2\times1.41\times10^{9}=1.949\times10^{13}\approx19.5$ TFLOPS. A fused multiply-add is one instruction but two floating-point operations, and the standard peak counts both.
+  \item[7.5] $20+30=50$ cycles (both paths are executed, serialised). While \cl{A} runs, $8$ of the $32$ threads are active ($tid\bmod4=0$): $25\%$. During \cl{B}, $24/32=75\%$. Divergence-free version: \cl{if ((tid/32) \% 4 == 0)}: warp~0 of the $4$ warps takes \cl{A} ($25\%$ of the threads), the others take \cl{B}; each warp takes a single path, so no warp pays both costs.
+  \item[7.6] SIMT: the programmer writes code for one thread; the hardware runs $32$ threads (a warp) with one instruction issued for all of them, each on its own registers and data, with per-thread branch handling via masking. A CPU SIMD unit operates on one wide vector register explicitly specified by the program, and branching has to be done by hand with masks. It is lock-step because the $32$ threads are issued one common instruction each cycle (divergent threads are masked off, not run independently).
+  \item[7.7] $108\times1024\times2\times1.41\times10^{9}=3.12\times10^{14}=312$ TFLOPS. $312/19.5=16$.
+  \item[7.8] $2048/32=64$ warps per SM; spread evenly over $4$ partitions, $16$ warps per partition.
+\end{description}
+
+\section*{Chapter 8}
+\begin{description}[leftmargin=1.2cm,labelwidth=1cm,itemsep=3pt]
+  \item[8.1] Registers: one thread, read/write, on-chip. Local: one thread, read/write, in device DRAM. Shared: threads of one block, read/write, on-chip. Global: all threads and the host, read/write, device DRAM. Constant and texture: all threads read-only (host read/write), device DRAM with a cache.
+  \item[8.2] It suggests fast, cached on-chip storage, but it only means private to a thread; the data is in device DRAM (global-memory latency). Used for register spills and for per-thread arrays that are too large or indexed dynamically.
+  \item[8.3] A block needs $256\times40=10\,240$ registers; $\lfloor65\,536/10\,240\rfloor=6$ blocks $=1536$ threads $=48$ warps. (The $2048$-thread limit would have allowed $8$ blocks, so registers are the limit.) Occupancy $48/64=75\%$.
+  \item[8.4] $4096/8=512$ B $\times877.5\times10^{6}\times2=8.99\times10^{11}\approx900$ GB/s.
+  \item[8.5] $n$ FLOPs, $12n$ bytes (two reads and one write of $4$ bytes): $0.083$ FLOP/B, far below $12.5$: memory-bound; it runs at about $0.7\%$ of peak FLOPs.
+  \item[8.6] Traffic falls by a factor $T=32$. Two tiles of $32\times32$ floats: $2\times1024\times4=8192$~B $=8$~KB, which fits in $48$~KB (six such blocks would fit in $48$~KB).
+  \item[8.7] (a) $32\times4=128$ B contiguous: $1$ transaction. (b) Span $64\times4=256$ B: $2$ transactions. (c) Stride $128$ B: $32$ transactions.
+  \item[8.8] \cl{s[t]}: conflict-free. \cl{s[t+1]}: conflict-free (a shift permutes the banks). \cl{s[2*t]}: $2$-way. \cl{s[32*t]}: $32$-way (all in bank $0$). \cl{s[0]}: conflict-free (broadcast).
+  \item[8.9] Memory latency is $\sim300$ cycles, and to keep $1555$~GB/s flowing about $331$~KB must be in flight (bandwidth $\times$ latency); this takes thousands of threads each with a request outstanding. A CPU relies on caches and prefetching to avoid long latencies and needs only a few outstanding misses per core.
+  \item[8.10] (1) Fast context switching because all resident threads keep their registers: write kernels with enough threads (and few enough registers) to keep many warps resident so that latency is hidden. (2) Explicitly managed cache: you must copy reused data into shared memory yourself (tiling) and synchronise the block around it.
+\end{description}
+
+\section*{Chapter 10 (out of syllabus)}
+\begin{description}[leftmargin=1.2cm,labelwidth=1cm,itemsep=3pt]
+  \item[10.1] SMs $1.35$; FP32 $1.24$; bandwidth $1.73$; L2 $6.7$. The L2 cache grew most (and Tensor Core throughput, $2.5\times$): the transistor budget went to cache, memory and matrix engines rather than to more general FP32 cores.
+  \item[10.2] $108\times64\times2\times1.41\times10^{9}=1.949\times10^{13}\approx19.5$ TFLOPS, twice the non-Tensor FP64 peak of $9.7$ TFLOPS.
+  \item[10.3] Training needs a wide range of values (to avoid overflow or underflow of gradients), which the $8$ exponent bits provide; the lost mantissa precision matters little because many small errors average out and accumulation is done in FP32. They also use less memory and bandwidth, and the Tensor Cores run them faster.
+  \item[10.4] Keep the two largest magnitudes, $-0.9$ and $0.5$: $(0,-0.9,0,0.5)$. Stored: the two values and their positions ($1$ and $3$). The dot product needs $2$ multiplications instead of $4$.
+  \item[10.5] $5/16\times40$~MB $=12.5$~MB (equal to $25$ slices of $512$~KB).
+  \item[10.6] No overlap: $20(2+3)=100$. Double buffering: $L+(n-1)\max(L,C)+C=2+19\cdot3+3=62$. Speed-up $100/62\approx1.6$. (Compute is the bottleneck, so the loads are completely hidden except the first.)
+  \item[10.7] $3$ slices $\times14=42$ SMs and $3\times10=30$ L2 slices. At most $7$ instances.
+  \item[10.8] Per link $4\times50=200$~Gbit/s $=25$~GB/s per direction; $12$ links give $300$ GB/s per direction, $600$~GB/s total. Over NVLink $6/300=0.02$~s; over PCIe~4 $6/31.5\approx0.19$~s.
+\end{description}

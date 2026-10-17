@@ -1,0 +1,183 @@
+\chapter{Why Parallel Computers?}
+\label{ch:why}
+
+\slides{2}
+
+Every slide deck on parallel computing starts by saying that processors stopped getting faster.
+That sounds odd: a laptop today is certainly faster than one from ten years ago. This chapter
+explains what stopped, what did not, and why the industry's answer was to put \emph{many} processors on a chip
+instead of one faster one.
+
+\section{The free lunch is over}
+
+For roughly thirty years, a programmer could write a program once and expect it to run faster on
+every new generation of computer, with no changes at all. Two trends made this possible:
+
+\begin{itemize}
+  \item \textbf{More transistors.} A transistor is the tiny electronic switch that all digital
+        circuits are built from. \term{Moore's law} is the observation that the number of
+        transistors that fit on a chip doubles roughly every two years. This is still
+        approximately true.
+  \item \textbf{Higher clock frequency.} A processor does its work in steps called
+        \emph{cycles}, paced by a clock. A $3$~GHz clock ticks three billion times per second.
+        If you can raise the clock frequency, every instruction finishes sooner and every program speeds up.
+\end{itemize}
+
+The second trend is the one that ended. Clock frequencies climbed from a few MHz in the early
+1980s to about $3$--$4$~GHz in the mid-2000s and then stopped, and they have stayed there. The
+slide says it briefly: \emph{``CPU speeds have saturated''}. There are two main reasons.
+
+\subsection{The power wall}
+
+A chip turns almost all the electrical power it uses into heat. The \emph{dynamic} power of a
+chip (the power spent switching transistors) is approximately
+\begin{equation}
+  P \;\approx\; \alpha\, C\, V^{2} f ,
+  \label{eq:power}
+\end{equation}
+where $f$ is the clock frequency, $V$ the supply voltage, $C$ the total capacitance being
+switched (roughly: how much circuitry there is), and $\alpha$ the fraction of the circuit that
+switches in each cycle.
+
+The catch is that $V$ cannot be chosen freely. A faster clock needs transistors to switch faster, which needs a
+higher voltage. To a first approximation $V$ grows in proportion to $f$, so
+\[
+  P \;\propto\; f^{3}.
+\]
+Doubling the frequency would need about eight times the power, and that power has to leave the
+chip as heat through an area the size of a postage stamp. Air cooling can remove on the order of
+100~watts from a chip; beyond that you need exotic cooling that is too expensive for ordinary computers.
+So frequency stopped rising.
+
+\begin{workedex}{two slow cores beat one fast core}
+Suppose one core runs at frequency $f$ and voltage $V$ and uses power $P_0$. Now run a core at
+$0.8f$. Under the simplification $V \propto f$ it needs only $0.8V$, so its power is
+\[
+  P = 0.8 \times (0.8)^2 \, P_0 = 0.512\,P_0 .
+\]
+Two such cores together use $2\times 0.512\,P_0 \approx 1.02\,P_0$, essentially the same power as the
+original single core, but if the work can be shared perfectly they deliver $2\times 0.8 = 1.6$
+times the throughput. Making a chip with more, slower cores is therefore a far better use of a fixed power budget than
+making a single core faster.
+\end{workedex}
+
+This is the central reason that parallel hardware became mandatory. The example hides an
+important condition, though: ``\emph{if the work can be shared perfectly}''. The hardware
+now offers parallelism; the software has to use it.
+
+\subsection{The memory wall}
+
+The second reason is that processors became much faster than main memory (DRAM). Two different
+quantities matter here:
+
+\begin{definition}{latency and bandwidth}
+\textbf{Latency} is the time one request takes from start to finish, for example the time
+between a core asking for a value and receiving it. \textbf{Bandwidth} is the amount of data
+moved per unit time, for example gigabytes per second.
+\end{definition}
+
+\begin{intuition}
+Think of a road. Latency is how long one car takes to drive from A to B. Bandwidth is how many cars
+per hour the road can carry. A road can have low latency and low bandwidth (one fast lane) or the other way round
+(a wide, slow motorway).
+\end{intuition}
+
+A main-memory access takes on the order of $100$~ns. At $3$~GHz that is hundreds of cycles during
+which the core could have executed many instructions. Caches (your Chapter~1) hide much of this
+latency by keeping recently used data close to the core. But caches do not help a program that
+streams through a huge array once, and the memory \emph{bandwidth} of a chip is also finite and is
+shared by all of its cores.
+
+\begin{pitfall}
+More cores do not automatically fix the memory wall. They bring more caches and more
+opportunities to overlap computation with data movement, but they also compete for the same memory
+bandwidth. This is one reason real machines have several memory channels and, as we will see in Chapter~2,
+why large machines distribute their memory among processors (NUMA).
+\end{pitfall}
+
+\subsection{A third limit: instruction-level parallelism}
+
+Inside a single core, hardware already runs several instructions at once when they do not depend on each other.
+This is \term{instruction-level parallelism} (ILP): pipelining, several execution units, out-of-order
+execution. It is invisible to the programmer. But finding independent instructions within one stream of ordinary code is
+hard, and each extra bit of ILP costs a lot of hardware, so there are rapidly diminishing returns after a few instructions per cycle.
+The remaining place to find parallelism is \emph{between} streams of instructions, which is
+what multiple cores and multiple machines provide.
+
+\section{Reasons to use parallel computing}
+
+The slide lists four motivations. Each is worth stating in full.
+
+\begin{enumerate}
+  \item \textbf{Faster execution.} A computation that takes days or months on one core might
+        take hours or seconds on many. Climate modelling and bioinformatics are the slide's examples:
+        a weather forecast that arrives after the weather is useless.
+  \item \textbf{Large amounts of data.} Some data sets do not fit in the memory of one machine,
+        or take too long to scan with one processor. If a data set is 10~TB and one machine has 64~GB
+        of RAM, the data must be spread over many machines and processed in parallel.
+  \item \textbf{Natural parallelism.} Many problems are made of many similar, nearly independent parts.
+        In a climate model the atmosphere is divided into a grid of cells, and the same update rule is applied to each
+        cell. Writing this as a serial loop \emph{hides} parallelism that was in the problem all along.
+  \item \textbf{Architecture trends.} The power and memory walls above: since a single core cannot be
+        made much faster, the only way to use more transistors is to build more cores.
+\end{enumerate}
+
+There are two different goals hidden in these. One is to solve the \emph{same problem faster}; the
+other is to solve a \emph{bigger problem in the same time}. Later slides give them precise names
+(strong and weak scaling).
+
+\section{Vocabulary used throughout}
+
+Parallel computing uses a lot of words that sound alike. Fix the meanings now.
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}l X@{}}
+\toprule
+\textbf{Term} & \textbf{Meaning in these notes}\\
+\midrule
+Core & One unit that executes one stream of instructions (possibly two when hyper-threading is used).\\
+Processor / socket / chip & A package containing one or several cores. Slides often say ``processor''
+  loosely to mean any processing element, so $P_1, P_2,\ldots$ may be cores or whole machines.\\
+Node & One complete computer (``one box''): one or more sockets plus memory, disk and a network card.\\
+Cluster & Many nodes connected by a network and used together. A supercomputer is in practice a very large cluster
+  with a very fast network.\\
+Process & A running program with its \emph{own} private address space.\\
+Thread & An independent flow of execution \emph{inside} a process; all threads of a process share its memory.\\
+Parallel & Several things really executing at the same instant (needs several cores).\\
+Concurrent & Several things in progress, possibly interleaved on one core. All parallel programs are
+  concurrent; not all concurrent programs are parallel.\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{Not everything can be parallelised}
+
+The slides remark that parallelism is ``more natural for certain kinds of problems''. The flip side is that
+some work is inherently sequential: step~2 needs the result of step~1. If a fraction $s$ of a
+program's running time is inherently serial, then no matter how many processors you use, the
+speedup can never exceed $1/s$. A program that is $10\%$ serial can never run more than $10\times$
+faster. The proper treatment (Amdahl's law) comes with the parallelisation-principles slides; keep this
+number in mind.
+
+\begin{keyidea}
+Physics (power and memory limits) forced hardware designers to provide parallelism instead of
+speed. Programmers now have to expose that parallelism in their programs. The rest of this part of the
+course asks: what does parallel hardware look like, how do its parts talk to each other, and what does
+that mean for performance?
+\end{keyidea}
+
+\section*{Exercises}
+\addcontentsline{toc}{section}{Exercises}
+\begin{enumerate}[label=\textbf{\thechapter.\arabic*},leftmargin=*]
+  \item Using $P\propto f^3$, by what factor does the dynamic power of a core change if its clock frequency
+        is raised by $25\%$?
+  \item A core at frequency $f$ uses power $P_0$. Using the same simplified model, how much
+        power do eight cores at $0.5f$ use in total, and what is their throughput relative to one core at $f$
+        (assuming perfectly parallel work)?
+  \item A program must read 12.8~GB from memory exactly once, and the memory system delivers
+        25.6~GB/s. What is the shortest possible running time, regardless of how many cores are used or how
+        low the latency is?
+  \item A program is 5\% inherently serial. What is the largest possible speedup, and what speedup
+        do 16 cores give? (Use $S(n)=1/(s+(1-s)/n)$.)
+  \item Explain the difference between latency and bandwidth using an example other than a road.
+\end{enumerate}

@@ -1,0 +1,216 @@
+\chapter{GPU Memory Hierarchy}
+\label{ch:gpumem}
+
+\slides{12--15}
+
+A GPU can do arithmetic much faster than it can fetch the numbers to do arithmetic on. Most of the effort of GPU programming goes into
+feeding the units. This chapter covers the memory system as presented in the slides: the CUDA memory spaces, the hierarchy and its latencies, and the differences from CPU threads.
+It then adds the explanations (latency hiding, coalescing, bank conflicts, occupancy) that the instructor gives in class and that the slides can only hint at; these
+extra parts are marked \emph{beyond the slides}.
+
+\section{The CUDA memory spaces}
+
+\slides{12}
+
+Slide~12 (a figure from an NVIDIA course) shows what a thread can access. Study it as a map of \emph{who can see what}:
+
+\begin{center}\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\linewidth}{@{}l l l X@{}}
+\toprule
+\textbf{Memory} & \textbf{Visible to} & \textbf{Access} & \textbf{Where it lives and what it is for}\\
+\midrule
+Registers & one thread & read/write & on the SM; fastest; a thread's scalar variables\\
+Local memory & one thread & read/write & private to the thread but stored in \emph{device memory}; used when registers run out (``spills'') and for large per-thread arrays\\
+Shared memory & all threads of one block & read/write & on the SM; programmer-managed scratch-pad shared by the block\\
+Global memory & all threads of the grid, and the host & read/write & off-chip device DRAM (HBM2 on the A100); big and slow; persists across kernel launches\\
+Constant memory & all threads, and the host & read-only for threads & device DRAM plus a small cache; for values every thread reads\\
+Texture memory & all threads, and the host & read-only for threads & device DRAM plus a texture cache; good for reads with 2-D spatial locality\\
+\bottomrule
+\end{tabularx}
+\end{center}
+``The host can read/write global, constant and texture memory (stored in DRAM)'': the CPU copies data in and out of exactly these three; it cannot touch a block's shared memory or a thread's registers.
+
+\begin{pitfall}
+\emph{Local} memory sounds fast, because in a CPU ``local'' means on the stack and cached. On a GPU it is a name for \emph{scope} (private to a thread),
+not a place: the data is in device DRAM, with the latency of global memory. Excessive use of registers pushes a thread's variables into local memory and slows the kernel down (see occupancy below).
+\end{pitfall}
+
+\section{Global (device) memory}
+
+\slides{13}
+
+\begin{definition}{global memory}
+The main memory of the GPU. It can be accessed by all threads running on all the SMs, and by the CPU host. It is implemented with DRAM stacks next to the processor chip.
+\end{definition}
+The slide quotes $12$~GB for the Kepler K40 and $80$~GB for an A100. The A100 comes in two memory sizes; the whitepaper describes the original $40$~GB card, and an $80$~GB version was
+released later with the same architecture. Both are consistent with the slide.
+
+\paragraph{HBM2 and bandwidth (from the whitepaper).}
+The A100 uses \term{HBM2} (high-bandwidth memory): DRAM chips stacked on top of each other and mounted beside the GPU on the same package, connected by a very wide bus. The $40$~GB A100 has $5$ active stacks, a $5120$-bit interface, and
+data rate $1215$~MHz DDR (double data rate: two transfers per clock). Therefore
+\begin{workedex}{A100 memory bandwidth}
+\[
+ \frac{5120\ \text{bits}}{8\ \text{bits/byte}}\times1215\times10^{6}\ \tfrac{\text{clk}}{\text{s}}\times2\ \tfrac{\text{transfers}}{\text{clk}}
+ =1.555\times10^{12}\ \text{B/s}=1555\ \text{GB/s}.
+\]
+This equals the whitepaper's $1555$~GB/s, about $1.7\times$ the V100's $900$~GB/s. A typical desktop CPU with dual-channel DDR4 reaches only a few tens of GB/s.
+\end{workedex}
+
+Between the SMs and global memory sits a large cache that all SMs share: the \textbf{L2 cache}, $40$~MB on the A100 (whitepaper), about $7\times$ the V100's, shown in blue in Figure~\ref{fig:gpu}.
+The L2 is the point of coherence for the whole GPU: the whitepaper states that it provides hardware cache coherence across the full chip, so, unlike the many private caches of Chapter~\ref{ch:coherence}, the programmer does not have to reason about stale copies of global data in L2.
+
+\paragraph{The arithmetic-intensity gap (beyond the slides).}
+\begin{workedex}{FLOPs per byte the A100 needs}
+Peak FP32 is $19.5$ TFLOPS and memory delivers $1555$~GB/s, so to keep the FP32 units busy the program must do
+\[
+ \frac{19.5\times10^{12}\ \text{FLOP/s}}{1.555\times10^{12}\ \text{B/s}}\approx12.5\ \text{FLOP per byte},
+\]
+i.e.\ about $50$ floating-point operations for every $4$-byte value fetched from global memory. Vector addition $c_i=a_i+b_i$ does $1$ FLOP while moving $12$ bytes ($2$ reads, $1$ write): $0.083$ FLOP/B, far below $12.5$.
+It is therefore \emph{memory-bound}: the SMs wait for data and reach only $0.083/12.5\approx0.7\%$ of the peak. To reach the peak the data brought in must be \emph{reused} many times, and that is what shared memory and registers are for.
+\end{workedex}
+
+\section{Shared memory and L1}
+
+\slides{13}
+
+\begin{definition}{shared memory}
+A small, fast memory \emph{inside each SM}, shared by all the threads of a thread block that runs on that SM. Different blocks have separate pieces of it and cannot see each other's.
+\end{definition}
+The slide: on the Kepler K40, the SMX has $64$~KB that can be configured as $16$, $32$ or $48$~KB of shared memory, with the rest used as L1 cache.
+On the A100 it is $192$~KB per SM: the same SRAM array is split between the L1 data cache and shared memory. (The whitepaper says
+shared memory can be configured to up to $164$~KB per SM, the rest being L1.)
+
+Unlike a hardware-managed cache, nothing enters shared memory unless a thread puts it there. This is what the slides call
+``cache explicitly managed'' (Section~\ref{sec:cpuvsgpu}).
+
+\begin{workedex}{why a scratch-pad helps: tiled matrix multiplication (beyond the slides)}
+Multiplying two $N\times N$ matrices, $C=AB$, every element $c_{ij}=\sum_k a_{ik}b_{kj}$.
+A simple kernel in which each thread computes one $c_{ij}$ reads $2N$ values from global memory per output element: $2N^{3}$ global reads in total.
+In a tiled version, a block of $T\times T$ threads loads a $T\times T$ tile of $A$ and one of $B$ into shared memory (one element per thread), then every thread uses them $T$ times
+from fast shared memory. Each global value is now read once per tile and used $T$ times, so the global traffic falls by a factor $T$ to $2N^{3}/T$.
+With $T=16$ the traffic is $16\times$ smaller. The programmer must write the code that loads the tiles; no hardware does it.
+\end{workedex}
+
+\paragraph{Bank conflicts (beyond the slides).}
+Shared memory is split into $32$ \term{banks}, each $4$ bytes wide, and consecutive $4$-byte words go to consecutive banks (word $w$ lives in bank $w\bmod32$). The $32$ threads of a warp can all be served in one go \emph{if they hit different banks}.
+If two threads of a warp ask for different words in the same bank, the accesses are serialised (a \term{bank conflict}). If all $32$ ask for different words in one bank the access is $32$ times slower.
+Reading a \cl{float} array with \cl{x[tid]} is conflict-free (thread $t$ hits bank $t$). Reading \cl{x[2*tid]} gives a $2$-way conflict: threads $t$ and $t+16$ both hit bank $2t\bmod32$. (If all threads read the \emph{same} word, it is broadcast to everyone and there is no conflict.)
+
+\section{Registers}
+
+\slides{14}
+
+\begin{definition}{registers}
+The fastest storage, held in each SM's register file. A thread keeps its local scalar variables in registers, and the registers are \emph{private} to a thread.
+\end{definition}
+Slide~14: Kepler K40 and A100 both have $64$K ($65\,536$) $32$-bit registers per SM(X); that is $256$~KB of registers, more than the $192$~KB of shared memory/L1.
+Registers are not time-shared as on a CPU: a resident thread keeps its registers allocated until it finishes. This has an important consequence.
+
+\begin{definition}{occupancy}
+The ratio of the number of warps resident on an SM to the maximum the SM supports ($64$ warps, i.e.\ $2048$ threads, on the A100).
+\end{definition}
+\begin{workedex}{registers limit how many threads fit}
+The register file holds $65\,536$ registers. If every thread needs $r$ registers, at most $\lfloor65\,536/r\rfloor$ threads are resident:
+\begin{center}\small
+\begin{tabular}{@{}rrrr@{}}
+\toprule
+$r$ (regs/thread) & max threads & warps & occupancy\\
+\midrule
+$32$ & $2048$ & $64$ & $100\%$\\
+$64$ & $1024$ & $32$ & $50\%$\\
+$128$ & $512$ & $16$ & $25\%$\\
+$255$ (hardware maximum) & $257\to$ rounds to $256$ & $8$ & $12.5\%$\\
+\bottomrule
+\end{tabular}
+\end{center}
+(For the last row $65\,536/255=257.0$, but threads are scheduled in whole warps and blocks, so we take $256$.) So a kernel with $32$ registers per thread can fill an SM; a kernel that needs $128$ cannot.
+The same argument applies to shared memory: a block using $48$~KB of shared memory leaves room for only $\lfloor164/48\rfloor=3$ such blocks on one SM.
+\end{workedex}
+
+\section{Constant and texture memory}
+
+\slides{14}
+
+The slide: constant and texture memory are \emph{accessed by all the threads}. Both are read-only from the GPU's side and live in device DRAM, but each is fronted by a special cache.
+\begin{itemize}
+  \item \textbf{Constant memory}: values such as coefficients and parameters that all threads read. The cache can broadcast one value to all threads of a warp in one go.
+  \item \textbf{Texture memory}: ``used to improve performance of reads that exhibit spatial locality among the threads''. A texture cache is organised for $2$-D neighbourhoods: thread $(x,y)$ reading the pixel at $(x,y)$ will often be next to a thread that reads $(x+1,y)$ or $(x,y+1)$; a normal row-major cache line serves only the first.
+\end{itemize}
+
+\section{Latency numbers and latency hiding}
+\label{sec:latency}
+
+\slides{14}
+
+The slide gives two latencies: global/device memory about $200$--$400$ clock cycles (``about $300$~ns''), and shared memory about $20$--$30$ cycles (``about $5$~ns'').
+Take the \emph{cycle} counts as the information to remember: the conversion to nanoseconds depends on the clock (at $1$~GHz a cycle is $1$~ns,
+so $300$ cycles is $300$~ns and $25$ cycles is $25$~ns, not $5$~ns). What matters is the ratio: global memory is roughly $10$ times slower than shared memory, and a few hundred times slower than a register access (about one cycle of dependent latency).
+
+\paragraph{How a GPU deals with $300$-cycle latency (beyond the slides).}
+A CPU core handles memory latency with big caches and speculation. A GPU has neither in large amounts. Instead the SM simply \emph{switches to another warp}.
+Each partition's scheduler looks at its resident warps, and each cycle picks one that is ready (its operands have arrived). When a warp issues a load and has to wait $300$ cycles, the scheduler runs other warps in the meantime.
+If enough warps are resident, some warp is always ready and the execution units never sit idle.
+\begin{definition}{latency hiding}
+Covering the waiting time of some threads by doing useful work for other threads, through fast thread switching and a large pool of resident threads.
+\end{definition}
+
+\begin{workedex}{how much parallelism hides the memory latency? (Little's law)}
+In steady state, \emph{the amount of data that must be in flight} equals bandwidth $\times$ latency. For the A100 at $1.41$~GHz,
+$300$ cycles is $300/1.41\times10^{9}\approx213$~ns, so
+\[
+ 1555\ \text{GB/s}\times213\ \text{ns}\approx331\ \text{KB}
+\]
+must be outstanding at any moment to keep HBM2 busy. Over $108$ SMs this is about $3.1$~KB per SM, e.g.\ $\approx 770$ threads, each with one $4$-byte load pending.
+This is only possible with thousands of resident threads. A CPU core with, say, $10$ outstanding loads could never do it, which is why ``many threads'' is not a luxury for a GPU, it is a necessity.
+\end{workedex}
+
+\paragraph{Coalescing (beyond the slides).}
+When the $32$ threads of a warp execute a load, the hardware combines their addresses into as few \emph{memory transactions} as possible: global memory is served in aligned chunks (typically $32$-byte sectors, up to $128$-byte lines).
+If thread $t$ reads the $4$-byte element $x[t]$ (consecutive addresses), the $32$ requests fall in one $128$-byte line: one transaction, $100\%$ of the fetched bytes are used.
+If instead thread $t$ reads \cl{x[32*t]} (stride of $128$ bytes), each request is in a different line: $32$ transactions, and only $4$ of the $128$ fetched bytes ($3\%$) are used.
+This is \term{coalescing}. Rule of thumb: have neighbouring threads access neighbouring addresses. It is the GPU counterpart of the spatial locality you know from CPU caches, but across the threads of a warp instead of across the iterations of a loop.
+
+\begin{pitfall}
+Consequence for data layout: an array of structures (\cl{struct\{float x,y,z;\} p[N]}) read as \cl{p[t].x} has a stride of $12$ bytes between neighbouring threads, which wastes bandwidth.
+A structure of arrays (\cl{float x[N], y[N], z[N]}) read as \cl{x[t]} is coalesced.
+\end{pitfall}
+
+\section{How GPU threads differ from CPU threads}
+\label{sec:cpuvsgpu}
+
+\slides{15}
+
+Slide~15 lists two differences from CPU threads.
+
+\begin{enumerate}
+  \item \textbf{Context switching is fast.} On a CPU, switching from one thread to another means that the operating system saves the registers of the old thread to memory and loads those of the new thread (hundreds to thousands of cycles).
+        On a GPU, as the slide says, ``the state of a thread (thread block) stored in shared memory and registers stay till execution completion''. Every resident thread already has its own slice of the register file, so switching to another warp costs nothing: the scheduler just issues from a different warp
+        in the next cycle. This is what makes latency hiding possible.
+  \item \textbf{Cache explicitly managed.} A CPU cache is invisible to the programmer: the hardware decides what to keep. On a GPU, as the slide says, ``user's program will have to explicitly bring the frequently accessed data from the device to the shared memory''. The programmer writes the load into shared memory and decides what to keep.
+        (There is an L1/L2 hardware cache as well, but the significant reuse is expected to be scheduled in software.)
+\end{enumerate}
+
+\paragraph{Hardware help for explicit staging (from the whitepaper).}
+Staging data has traditionally cost registers and instructions: a load from global memory goes first into a register, and is then stored from there into shared memory. The A100 adds an \term{asynchronous copy} instruction that moves data directly from global memory
+into shared memory, bypassing the register file, while the thread continues with other work; completion is signalled with hardware barrier objects. This allows loading the next tile while computing on the current one (``double buffering''). The whitepaper also describes
+\emph{L2 cache residency control}, with which the program can tell the L2 to keep or evict specific data.
+
+\begin{keyidea}
+A CPU hides latency with caches and prediction, and the hardware does it for you. A GPU hides latency with thousands of threads that can be switched at no cost, and
+the programmer must organise the data reuse. In return a GPU delivers far more arithmetic and memory bandwidth per chip.
+\end{keyidea}
+
+\section*{Exercises}
+\begin{enumerate}[label=\textbf{\thechapter.\arabic*},leftmargin=*]
+  \item For each of registers, local, shared, global, constant and texture memory, state who can read it, who can write it, and whether it is on-chip or in device DRAM.
+  \item Why is ``local memory'' a misleading name? When does a thread use it?
+  \item A kernel uses $40$ registers per thread and blocks of $256$ threads. How many threads, warps and blocks can be resident on one A100 SM if registers are the only limit? What is the occupancy? ($65\,536$ registers per SM; max $2048$ threads.)
+  \item Compute the bandwidth of an HBM2 interface of $4096$ bits at $877.5$~MHz DDR (the V100 of the whitepaper), in GB/s.
+  \item Vector addition of $n$ \cl{float}s: how many FLOPs and how many bytes of global traffic? Compute the arithmetic intensity and say whether it is compute-bound or memory-bound on the A100 ($12.5$ FLOP/B).
+  \item In a tiled matrix multiplication with $T=32$ tiles, by what factor is the global-memory traffic reduced? How much shared memory per block do the two tiles of \cl{float}s use? Does a block fit in the K40's $48$~KB?
+  \item A warp reads \cl{float a[...]}. Count the $128$-byte transactions for (a) \cl{a[t]}, (b) \cl{a[2*t]}, (c) \cl{a[32*t]}, $t=0..31$.
+  \item Shared memory has $32$ banks of $4$ bytes. Which of \cl{s[t]}, \cl{s[t+1]}, \cl{s[2*t]}, \cl{s[32*t]}, \cl{s[0]} (all threads) are conflict-free, and how many-way is the conflict in the others?
+  \item Why does a GPU need many more threads than it has execution units, whereas a CPU does not? Use Little's law in your answer.
+  \item List the two differences between GPU and CPU threads on slide~15 and explain how each one affects the way you write a program.
+\end{enumerate}

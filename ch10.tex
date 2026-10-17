@@ -1,0 +1,227 @@
+\chapter{Beyond the Syllabus: More on the A100}
+\label{ch:beyond}
+
+\begin{outofsyllabus}
+\textbf{This whole chapter is out of syllabus.} None of it is on the Many-core Architectures slides, and I do not know whether the instructor will mention
+any of it. It is here for depth, taken from NVIDIA's \emph{A100 Tensor Core GPU Architecture} whitepaper. If you only want to prepare for the course, skip it and use Chapters~6--9.
+Each section below is tagged \textsc{Out of syllabus}. Numbers are from the whitepaper unless a line says ``derived'' (computed by us from the whitepaper's numbers) or ``general knowledge''.
+\end{outofsyllabus}
+
+\section{Three generations side by side}
+\oos
+
+Table~\ref{tab:gen} is the whitepaper's comparison of the A100 with its two predecessors, P100 (Pascal, 2016) and V100 (Volta, 2017).
+
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+ & \textbf{P100} & \textbf{V100} & \textbf{A100}\\
+\midrule
+SMs & 56 & 80 & 108\\
+FP32 cores / SM & 64 & 64 & 64\\
+FP32 cores / GPU & 3584 & 5120 & 6912\\
+FP64 cores / GPU (non-Tensor) & 1792 & 2560 & 3456\\
+Tensor Cores / SM & --- & 8 & 4\\
+Tensor Cores / GPU & --- & 640 & 432\\
+Boost clock (MHz) & 1480 & 1530 & 1410\\
+Peak FP32 (TFLOPS, non-Tensor) & 10.6 & 15.7 & 19.5\\
+Peak FP64 (TFLOPS, non-Tensor) & 5.3 & 7.8 & 9.7\\
+Peak FP16 Tensor (TFLOPS) & --- & 125 & 312 (624 sparse)\\
+Memory interface & 4096-bit HBM2 & 4096-bit HBM2 & 5120-bit HBM2\\
+Memory size & 16 GB & 32/16 GB & 40 GB\\
+Memory bandwidth (GB/s) & 720 & 900 & 1555\\
+L2 cache (KB) & 4096 & 6144 & 40\,960\\
+Shared memory / SM (KB) & 64 & up to 96 & up to 164\\
+Register file / SM (KB) & 256 & 256 & 256\\
+TDP (W) & 300 & 300 & 400\\
+Transistors (billions) & 15.3 & 21.1 & 54.2\\
+Process & 16\,nm & 12\,nm & 7\,nm\\
+\bottomrule
+\end{tabular}
+\caption{P100, V100 and A100 (whitepaper, Table~4).}
+\label{tab:gen}
+\end{table}
+
+\begin{workedex}{what changed most from V100 to A100? (derived)}
+Ratios A100/V100: SMs $108/80=1.35$; FP32 TFLOPS $19.5/15.7=1.24$; memory bandwidth $1555/900=1.73$; L2 $40\,960/6144=6.7$;
+FP16 Tensor $312/125=2.5$. So the biggest jumps are the matrix engines and the L2 cache, while ordinary FP32 arithmetic grew only about $24\%$. The A100 designers
+spent the new transistors (and extra $100$~W) mainly on Tensor Cores, cache and memory bandwidth, not on more general-purpose cores.
+Interesting detail: the number of Tensor Cores per SM \emph{fell} from $8$ to $4$, yet the rate per SM more than doubled
+(each A100 Tensor Core is $4\times$ as wide as a V100 one, see below).
+\end{workedex}
+
+\section{Third-generation Tensor Cores}
+\oos
+
+Chapter~\ref{ch:a100} introduced the Tensor Core as a matrix-multiply-accumulate engine. Here is what the whitepaper adds.
+
+\subsection{New number formats}
+
+Besides the FP16, INT8, INT4 and binary formats of earlier GPUs, the A100 Tensor Core supports \textbf{TF32, BF16 and FP64}.
+These formats differ in how the $16$ to $64$ bits are split into a sign, an \emph{exponent} (which sets the \emph{range} of numbers) and a \emph{mantissa} (which sets the \emph{precision}).
+(The bit splits below are general knowledge, not quoted from the whitepaper.)
+
+\begin{center}\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Format} & \textbf{Exponent bits} & \textbf{Mantissa bits} & \textbf{Remark}\\
+\midrule
+FP32 & 8 & 23 & usual ``float''\\
+TF32 & 8 & 10 & FP32's range, FP16's precision; stored in a 32-bit word\\
+FP16 & 5 & 10 & small range; can overflow in training\\
+BF16 & 8 & 7 & FP32's range, low precision\\
+\bottomrule
+\end{tabular}
+\end{center}
+\begin{intuition}
+Deep-learning training needs a wide \emph{range} more than high \emph{precision}. TF32 and BF16 keep FP32's $8$ exponent bits, so values do not overflow, and give up mantissa bits to save area and bandwidth.
+A programmer can keep ordinary FP32 data in memory and let the Tensor Core round it to TF32 for the multiplication, accumulating in FP32.
+\end{intuition}
+
+The whitepaper's rate comparison (A100 versus V100, peak, per GPU):
+\begin{center}\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+\textbf{Mode} & \textbf{V100} & \textbf{A100 dense} & \textbf{A100 sparse}\\
+\midrule
+FP16 Tensor & 125 TFLOPS & 312 (2.5$\times$) & 624 (5$\times$)\\
+TF32 Tensor (vs.\ V100 FP32) & 15.7 TFLOPS & 156 (10$\times$) & 312 (20$\times$)\\
+BF16 Tensor & --- & 312 & 624\\
+FP64 Tensor & 7.8 TFLOPS & 19.5 (2.5$\times$) & ---\\
+INT8 Tensor & 62 TOPS & 624 (10$\times$) & 1248\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{workedex}{per-clock rates (derived and checked)}
+The whitepaper: a V100 Tensor Core does $64$ FP16/FP32 FMAs per clock, an A100 Tensor Core $256$. Per SM: V100 $8\times64=512$; A100 $4\times256=1024$ FMA/clock, \emph{twice} the V100's per SM.
+Chip peak for A100: $108\times1024\times2\times1.41$~GHz $=312$ TFLOPS, and for V100: $80\times512\times2\times1.53$~GHz $=125$ TFLOPS, matching the table.
+FP64 on Tensor Cores: the whitepaper gives $64$ FP64 FMA per SM per clock, so $108\times64\times2\times1.41$~GHz $=19.5$ TFLOPS, matching the table.
+This is double the $9.7$ TFLOPS of the ordinary FP64 units.
+\end{workedex}
+
+\subsection{Why the new Tensor Core also saves instructions}
+
+On Volta, the data of one matrix operation was shared among $8$ threads of a warp; on the A100 it is shared across \textbf{all $32$ threads of the warp}, and a single instruction can cover a deeper slice of the
+multiplication (up to $4\times$ larger $k$ dimension, where $k$ is the length of the dot products). The whitepaper reports for a $16\times16\times16$ multiply (per SM partition): register-file reads fall from $80$ to $28$, and
+the number of issued instructions from $16$ to $2$. Fewer instructions and fewer register reads mean less power and leave the issue slots free for other work.
+
+\section{Fine-grained structured sparsity}
+\oos
+
+Trained neural networks contain many weights that are close to zero and can be set to exactly zero with little loss of accuracy (\emph{pruning}). The A100 supports a specific pattern:
+\begin{definition}{2:4 structured sparsity}
+In every group of four consecutive weights, \emph{at most two are non-zero}. The two zeros per group need not be stored, so the matrix can be compressed to about half its size (plus a little index information
+saying which positions were kept). The Tensor Core then multiplies only the kept values.
+\end{definition}
+Effect (whitepaper): storage and bandwidth cut by ``almost $2\times$'', and the Tensor Core operation takes half the cycles ($N/2$ instead of $N$ in the example), hence the factor-$2$ rows in the table above ($312\to624$ TFLOPS).
+Why ``almost''? Because of the index information. Why a fixed pattern? Because a fixed pattern is easy for the hardware to decode: with random sparsity the hardware could not keep all units busy.
+
+\begin{workedex}{a 2:4 group}
+Weights $(0.8,\ 0.05,\ -0.6,\ 0.01)$: keep the two largest magnitudes $0.8$ and $-0.6$, zero the other two $\to(0.8,0,-0.6,0)$. Stored: $(0.8,-0.6)$ plus the positions ($0$ and $2$). A dense $4$-element dot product (4 multiplications) becomes $2$ multiplications.
+\end{workedex}
+The recommended workflow is: train the dense network, prune to the $2:4$ pattern, then \emph{fine-tune} the remaining weights to recover accuracy.
+
+\section{More details of the SM and the memory system}
+\oos
+
+\subsection{FP32 and INT32 side by side}
+The SM has separate FP32 and INT32 units, so floating-point and integer instructions can run simultaneously at full rate. The whitepaper's example is pointer and index arithmetic in loops: while an
+FP32 multiply-add works on data, the INT32 units compute the address of the next element.
+(This is why the SM diagram has both INT32 and FP32 columns; see Figure~\ref{fig:sm}.)
+
+\subsection{The L2 cache in more detail}
+\begin{itemize}
+  \item The $40$~MB L2 is divided into \textbf{two partitions}; each partition holds data for the GPCs directly connected to it, which reduces the distance and the contention (compare the two blue halves in Figure~\ref{fig:gpu}).
+  \item Each partition has $40$ slices, so $80$ slices in all; each slice is $512$~KB: $80\times512$~KB $=40$~MB (derived check). The full chip has $12$ memory controllers, the A100 has $10$, each with eight slices attached: $10\times8=80$.
+  \item L2 read bandwidth is $5120$ bytes per clock (V100: $2048$): $2.5\times$. If the L2 ran at the boost clock, which the whitepaper does not state, that would be about $5120\times1.41$~GHz $\approx7.2$~TB/s, roughly $4.6\times$ the HBM2 bandwidth. The point is that data that hits in L2 is far cheaper than data from HBM.
+  \item \textbf{Compute data compression}: the memory system can store data in compressed form (useful for sparse or repetitive data) and gives up to $4\times$ DRAM read/write bandwidth, up to $4\times$ L2 read bandwidth and up to $2\times$ L2 capacity.
+  \item \textbf{L2 residency control}: the program can tell the hardware which data to keep in L2. A part of the cache can be set aside for \emph{persistent} accesses, in steps of $1/16$ of the cache ($40/16=2.5$~MB). The programmer marks an address range as ``persisting''; other accesses stream through the rest. The whitepaper's histogram example gets a $2.5\times$ speed-up over V100 and $43\%$ over an A100 without the control. It is not available in MIG mode.
+\end{itemize}
+
+\subsection{Asynchronous copy, asynchronous barriers}
+Recall the explicit staging of Chapter~\ref{ch:gpumem}. The A100 helps in two ways:
+\begin{itemize}
+  \item \textbf{Asynchronous copy} (CUDA 11): data goes from global memory straight into shared memory, skipping the register file. Variants: \emph{BYPASS} (skip L1 too) and \emph{ACCESS} (also keep a copy in L1 for reuse). The thread does not wait; it issues the copy and does other work.
+  \item \textbf{Asynchronous barriers}: hardware barriers in shared memory with separate \emph{arrive} and \emph{wait} operations, so a thread can say ``I'm done'' and continue with independent work before waiting. They can synchronise any subset of the threads of a block, not just whole blocks.
+\end{itemize}
+\begin{workedex}{what overlap buys (derived, simple model)}
+Process $n$ tiles. Loading one tile takes $L$, computing on it takes $C$. Without overlap: $n(L+C)$. With double buffering (load tile $i+1$ while computing on tile $i$): about $L+(n-1)\max(L,C)+C$.
+For $L=C=1$ and $n=10$: $20$ versus $1+9+1=11$ time units, nearly $2\times$ faster. If the loads go through registers they occupy registers and instruction slots; the asynchronous copy avoids both.
+\end{workedex}
+
+\subsection{Other CUDA-level improvements}
+\begin{itemize}
+  \item \textbf{Warp-wide reductions}: reducing $32$ values (sum, min, max, and, or, xor) used to take $\log_2 32=5$ shuffle-and-add steps; the A100 has a hardware instruction that does it in one step (reached through Cooperative Groups).
+  \item \textbf{Atomic operations}: FP16 atomics are $11\times$ and FP32 atomics $2.7\times$ faster than on V100.
+  \item \textbf{CUDA task graphs}: describe a whole workflow of kernels and copies as a graph once, launch it many times with one call; this cuts launch overhead for workloads of many small kernels. Cooperative launches reduced grid-synchronisation overhead by up to $30\%$.
+\end{itemize}
+
+\section{Multi-Instance GPU (MIG)}
+\oos
+
+\begin{definition}{MIG}
+\term{Multi-Instance GPU} lets one A100 be divided in hardware into up to \textbf{seven} independent \term{GPU Instances}, each behaving like a smaller GPU with its own SMs, its own L2 slices, and its own part of the memory.
+\end{definition}
+\begin{intuition}
+A big GPU is often not fully used by a small job (say, inference for one model). With MIG, one A100 serves seven such jobs at once, and a misbehaving job cannot slow down or crash the others,
+because each instance has its own separate path through crossbar, L2 banks, memory controllers and DRAM address buses.
+\end{intuition}
+Key facts (whitepaper):
+\begin{itemize}
+  \item One \textbf{GPU slice} $=$ one GPC $+$ a group of $10$ L2 slices $+$ a share of the memory. In MIG mode each GPC has $7$ TPCs ($14$ SMs) enabled.
+  \item A \textbf{GPU Instance} contains one or more slices. Inside it, \textbf{Compute Instances} subdivide the compute resources (by default one per GPU instance).
+  \item Derived: $7$ slices $\times14$ SMs $=98$ SMs usable in MIG mode (out of $108$), and $7\times10=70$ of the $80$ L2 slices.
+  \item Use cases: renting separate slices to different cloud customers; isolating the faults of different applications of one user; sharing a GPU among several users in a lab. A DGX~A100 (eight GPUs) then offers up to $8\times7=56$ separate accelerators.
+  \item Limits: MIG is for compute only (no graphics), and the L2 set-aside of the previous section is disabled in MIG mode.
+\end{itemize}
+
+\section{Connecting GPUs: NVLink and PCIe}
+\oos
+
+Chapter~\ref{ch:manycore} stressed that the host--device link is slow compared with on-card memory. The whitepaper describes the two links of the A100.
+
+\begin{center}\small
+\begin{tabular}{@{}lrr@{}}
+\toprule
+ & \textbf{V100 NVLink~2} & \textbf{A100 NVLink~3}\\
+\midrule
+Signal rate per pair & 25.78 Gbit/s & 50 Gbit/s\\
+Pairs per direction per link & 8 & 4\\
+Bandwidth per link per direction & 25 GB/s & 25 GB/s\\
+Links per GPU & 6 & 12\\
+Total (both directions) & 300 GB/s & 600 GB/s\\
+\bottomrule
+\end{tabular}
+\end{center}
+\begin{workedex}{checking the NVLink numbers (derived)}
+A100 link: $4$ pairs $\times50$~Gbit/s $=200$~Gbit/s $=25$~GB/s per direction. $12$ links $\times25$~GB/s $=300$~GB/s per direction, $600$~GB/s in both directions together. V100: $6\times25=150$ per direction, $300$ total.
+So A100 doubles the bandwidth by doubling the \emph{number} of links, with each link having half the wires but twice the signalling rate.
+\end{workedex}
+\textbf{PCIe Gen~4} (host link): $31.5$~GB/s per direction for an $\times16$ slot, twice PCIe~3. Compare with NVLink's $300$~GB/s per direction: about $9.5\times$ (derived).
+In the offload example of Chapter~\ref{ch:manycore}, copying $2$~GB over PCIe~4 takes $2/31.5\approx0.063$~s; over NVLink it would take $2/300\approx0.007$~s.
+\textbf{SR-IOV} lets one physical PCIe GPU appear as several virtual devices to several virtual machines, which is the basis for sharing GPUs between cloud tenants.
+In a DGX A100, GPUs are connected through six \textbf{NVSwitch} chips (an all-to-all network inside the machine; compare the crossbar of Chapter~\ref{ch:networks}).
+
+\subsection{Error containment}
+The A100 adds hardware to \emph{detect} errors (ECC protects HBM2, L2, L1 and the register files, using SECDED: single-error-correct, double-error-detect), to \emph{attribute} an error to the application or instance that caused it,
+and to \emph{contain} it so that one failing job or MIG instance does not bring down the rest. The whitepaper gives no further numbers.
+
+\section{What this chapter did not cover}
+\oos
+
+The whitepaper text that I could read did not discuss \emph{independent thread scheduling}, the number of warp schedulers per SM beyond what the SM diagram shows, or the full list of shared-memory/L1 split sizes, so these are not covered. The DGX~A100 system
+and the sparse-network primer in the whitepaper's appendices are also left out as unrelated to chip architecture.
+
+\section*{Exercises (optional, out of syllabus)}
+\begin{enumerate}[label=\textbf{\thechapter.\arabic*},leftmargin=*]
+  \item Using Table~\ref{tab:gen}, compute the A100/V100 ratios for SM count, FP32 TFLOPS, memory bandwidth and L2 size. Which grew most, and what does that tell you about where the transistors went?
+  \item Verify the $19.5$ TFLOPS FP64 Tensor Core figure from $64$ FP64 FMA per SM per clock, and say how it compares with the non-Tensor FP64 peak.
+  \item Why are BF16 and TF32 popular for training even though they have fewer mantissa bits than FP32?
+  \item Apply 2:4 pruning to $(0.3,\,-0.9,\,0.1,\,0.5)$. What is stored? How many multiplications does the dot product with a dense vector need?
+  \item The L2 has $80$ slices of $512$~KB. If the persisting set-aside is $5/16$ of the cache, how large is it?
+  \item $n=20$ tiles, $L=2$, $C=3$ time units. Compare no overlap with double buffering using the formula of Section~10.4.
+  \item How many SMs and L2 slices does a MIG instance with $3$ GPU slices have? How many independent instances can one A100 host at most?
+  \item An A100 has $12$ NVLink links of $4$ pairs at $50$~Gbit/s each. Compute its total bandwidth, and the time to move $6$~GB to a peer GPU over NVLink (one direction) and over PCIe~4.
+\end{enumerate}

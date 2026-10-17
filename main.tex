@@ -1,0 +1,153 @@
+\documentclass[11pt,a4paper,openany]{book}
+
+% ---------- packages ----------
+\usepackage[a4paper,margin=2.4cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{mathpazo}
+\usepackage{courier}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs,array,tabularx}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc,shapes.geometric,fit,backgrounds,decorations.pathreplacing}
+\usepackage[most]{tcolorbox}
+\usepackage{listings}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage[hidelinks]{hyperref}
+
+\setlist{itemsep=2pt,topsep=4pt,parsep=0pt}
+\renewcommand{\arraystretch}{1.18}
+\setlength{\parskip}{4pt}
+\setlength{\parindent}{0pt}
+
+% ---------- headers ----------
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[LE]{\small\nouppercase{\leftmark}}
+\fancyhead[RO]{\small\nouppercase{\rightmark}}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+\titleformat{\chapter}[display]{\normalfont\huge\bfseries\color{blue!40!black}}{\chaptertitlename\ \thechapter}{10pt}{\Huge}
+\titlespacing*{\chapter}{0pt}{-10pt}{22pt}
+
+% ---------- colours / boxes ----------
+\definecolor{defblue}{RGB}{30,80,160}
+\definecolor{intgreen}{RGB}{30,120,70}
+\definecolor{warnred}{RGB}{170,40,40}
+\definecolor{exorange}{RGB}{200,110,20}
+\definecolor{keypurple}{RGB}{110,50,150}
+
+\tcbset{nbox/.style={enhanced,breakable,arc=2pt,boxrule=0.6pt,left=7pt,right=7pt,top=4pt,bottom=4pt,
+  fonttitle=\bfseries\small,before skip=9pt,after skip=9pt}}
+\newtcolorbox{definition}[1]{nbox,colback=defblue!5,colframe=defblue,title={Definition: #1}}
+\newtcolorbox{intuition}{nbox,colback=intgreen!6,colframe=intgreen,title={In plain words}}
+\newtcolorbox{pitfall}{nbox,colback=warnred!5,colframe=warnred,title={Watch out}}
+\newtcolorbox{workedex}[1]{nbox,colback=exorange!6,colframe=exorange,title={Worked example: #1}}
+\newtcolorbox{keyidea}{nbox,colback=keypurple!6,colframe=keypurple,title={Key idea}}
+
+\newtcolorbox{outofsyllabus}{nbox,colback=gray!10,colframe=black!70,title={OUT OF SYLLABUS}}
+\newcommand{\oos}{\noindent{\small\textcolor{red!60!black}{\textsc{Out of syllabus (not on the slides)}}}\par\smallskip}
+\newcommand{\slides}[1]{\noindent{\small\textcolor{teal!70!black}{\textsc{Matches slides #1}}}\par\smallskip}
+\newcommand{\term}[1]{\textbf{\textit{#1}}}
+\newcommand{\cl}[1]{\texttt{#1}}
+
+% ---------- listings ----------
+\lstset{language=C,basicstyle=\ttfamily\small,keywordstyle=\color{blue!60!black}\bfseries,
+  commentstyle=\color{green!40!black}\itshape,numbers=left,numberstyle=\tiny\color{gray},
+  frame=single,framerule=0.3pt,breaklines=true,columns=fullflexible,
+  xleftmargin=1.6em,framexleftmargin=1.6em,aboveskip=8pt,belowskip=8pt}
+
+% ---------- tikz styles ----------
+\tikzset{
+  >=Stealth,
+  pe/.style={draw,rounded corners=2pt,fill=blue!12,minimum width=9mm,minimum height=6.5mm,font=\small},
+  mm/.style={draw,fill=orange!18,minimum width=9mm,minimum height=6.5mm,font=\small},
+  ca/.style={draw,fill=green!15,minimum width=9mm,minimum height=4.5mm,font=\scriptsize},
+  swt/.style={draw,fill=gray!22,minimum size=5mm,font=\scriptsize},
+  busbar/.style={draw,fill=gray!18,minimum height=5mm,font=\scriptsize},
+  lnk/.style={thick},
+  dn/.style={circle,draw,fill=blue!12,minimum size=6mm,inner sep=0pt,font=\scriptsize},
+}
+
+\title{\textbf{Parallel and Many-core Architecture}\\[4pt]\Large Study notes to read alongside the slides\\[2pt]\large DS221: Introduction to Scalable Systems}
+\author{}
+\date{\today}
+
+\begin{document}
+\frontmatter
+\maketitle
+
+\chapter*{Preface}
+\addcontentsline{toc}{chapter}{Preface}
+
+These notes accompany the slide decks \emph{Parallel Architecture} and \emph{Many-core Architectures} used in DS221. The slides are
+short: each bullet stands for a few minutes of explanation in class. The notes are meant to
+supply that explanation, so that a student who missed the lectures, or who has never studied
+computer systems before, can follow every step.
+
+\subsection*{How to use the notes}
+\begin{itemize}
+  \item Each section starts with a line such as \textsc{Matches slides 5--7}. Read the slides
+        first, then the section, then try the exercises at the end of the chapter.
+  \item The order of material follows the slides: why parallel hardware exists (Chapter~1),
+        how parallel machines are classified (Chapter~2), caches and cache coherence
+        (Chapter~3), and interconnection networks (Chapter~4). Chapter~5 is a summary, a
+        formula sheet and a glossary. The second part is about many-core processors: why GPUs exist (Chapter~6), the
+        NVIDIA A100 chip (Chapter~7) and the GPU memory hierarchy (Chapter~8), with its own summary in Chapter~9. Chapter~10 goes deeper into the A100 than the slides do and is marked as \textbf{out of syllabus} throughout.
+  \item Solutions to all exercises are in Appendix~A. Try them before looking.
+\end{itemize}
+
+\subsection*{What is assumed}
+(For Chapters 6--9 the same assumptions hold; GPU numbers come from the NVIDIA A100 whitepaper, which the course lists as reading.)\par\smallskip
+You should know what a cache is and what a cache hit and miss are, how a memory address is split
+into tag, index and offset, and why locality matters. These are covered in Chapter~1 of Nihar
+Shah's notes (\emph{Notes on Parallel Computing}), which the notes below build on. One idea that
+is usually taught alongside caches but is \emph{not} covered there, the \emph{write policy}
+(write-through versus write-back and the dirty bit), is explained here in
+Section~\ref{sec:writepolicy} because cache coherence depends on it.
+
+\subsection*{The boxes}
+\begin{definition}{a term}
+Blue boxes define a term precisely. These are the words the slides and exams use.
+\end{definition}
+\begin{intuition}
+Green boxes restate an idea informally, often with an analogy.
+\end{intuition}
+\begin{workedex}{a calculation}
+Orange boxes work through numbers or a trace step by step.
+\end{workedex}
+\begin{pitfall}
+Red boxes mark common misconceptions and easy mistakes.
+\end{pitfall}
+\begin{keyidea}
+Purple boxes hold the one thing to remember from a section.
+\end{keyidea}
+
+\subsection*{A note on sources}
+The structure follows the slides. Where the notes go beyond the slides (for example, the cost
+model for messages, or the counting argument for Omega networks) this is said explicitly. Standard
+references are listed in Chapter~5: Grama, Gupta, Karypis and Kumar for networks, and Culler and
+Singh for caches and coherence. All text and figures here are original.
+
+\tableofcontents
+
+\mainmatter
+\input{ch1}
+\input{ch2}
+\input{ch3}
+\input{ch4}
+\input{ch5}
+\input{ch6}
+\input{ch7}
+\input{ch8}
+\input{ch9}
+\input{ch10}
+
+\appendix
+\input{solutions}
+
+\end{document}
